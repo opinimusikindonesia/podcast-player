@@ -1,0 +1,63 @@
+name: Build and Deploy
+
+on:
+  schedule:
+    - cron: '0 21 * * *' # Daily at 5:00 PM ET (22:00 UTC; 6 PM during EDT)
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - run: deno install
+
+      - name: Run tests
+        run: deno task test
+
+      - name: Fetch feeds
+        run: deno task fetch-feeds
+        env:
+          FEED_GIST_URL: ${{ vars.FEED_GIST_URL }}
+
+      - name: Verify artwork was generated
+        run: |
+          if ! grep -q '"artworkSrc": "data/artwork/' public/data/episodes.json; then
+            echo "::error::No local artwork paths found in episodes.json — sharp may have failed"
+            exit 1
+          fi
+
+      - name: Build
+        run: deno task build
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
